@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import pyodbc # For MSSQL database connection
 import numpy as np # For statistical calculations
+from tkinter import font # Import the font module
+import re # Import the regular expression module for Sample ID validation
 
 # Global variables for the matplotlib figure and axes
 fig = None
@@ -72,7 +74,7 @@ def create_table_if_not_exists():
                     Position INT NOT NULL,
                     HardnessValue FLOAT NOT NULL,
                     Timestamp DATETIME DEFAULT GETDATE()
-                )
+                ); -- Added semicolon
             """)
             conn.commit()
             print(f"Table '{TABLE_NAME}' checked/created successfully.")
@@ -90,7 +92,7 @@ def get_all_hardness_values():
     if conn:
         cursor = conn.cursor()
         try:
-            cursor.execute(f"SELECT HardnessValue, TopOrBottom FROM {TABLE_NAME} ORDER BY Timestamp ASC")
+            cursor.execute(f"SELECT HardnessValue, TopOrBottom FROM {TABLE_NAME} ORDER BY Timestamp ASC;") # Added semicolon
             for row in cursor.fetchall():
                 value, category = row
                 if category == 'Bottom':
@@ -136,19 +138,20 @@ def create_plot_area():
     global fig, ax_bottom, ax_top, canvas_widget
 
     # Create a matplotlib figure with two subplots (2 rows, 1 column)
-    fig, (ax_bottom, ax_top) = plt.subplots(2, 1, figsize=(6, 8)) # Adjust size as needed for two plots
+    # Changed figsize height from 8 to 4 (half as tall)
+    fig, (ax_bottom, ax_top) = plt.subplots(2, 1, figsize=(6, 4))
 
     # Configure Bottom Hardness plot
     ax_bottom.set_title('Bottom Hardness Readings')
     ax_bottom.set_xlabel('Position')
-    ax_bottom.set_ylabel('Hardness Value (Brinell Hardness - BHN)') # Updated label
+    ax_bottom.set_ylabel('Hardness - BHN') # Updated label
     ax_bottom.grid(True)
     ax_bottom.set_ylim(bottom=0) # Ensure y-axis starts from 0 or a reasonable minimum
 
     # Configure Top Hardness plot
     ax_top.set_title('Top Hardness Readings')
     ax_top.set_xlabel('Position')
-    ax_top.set_ylabel('Hardness Value (Brinell Hardness - BHN)') # Updated label
+    ax_top.set_ylabel('Hardness - BHN') # Updated label
     ax_top.grid(True)
     ax_top.set_ylim(bottom=0) # Ensure y-axis starts from 0 or a reasonable minimum
 
@@ -158,7 +161,7 @@ def create_plot_area():
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas_widget = canvas.get_tk_widget()
     # Place the canvas below the input fields and button
-    canvas_widget.grid(row=root.grid_size()[1], column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
+    canvas_widget.grid(row=root.grid_size()[1], column=0, columnspan=num_display_columns, padx=10, pady=10, sticky="nsew")
     canvas.draw()
 
 def update_plot(current_bottom_values, current_top_values,
@@ -194,7 +197,7 @@ def update_plot(current_bottom_values, current_top_values,
     ax_bottom.plot(x_positions, current_bottom_values, marker='o', linestyle='-', color='skyblue', label='Current Reading')
     ax_bottom.set_title('Bottom Hardness Readings')
     ax_bottom.set_xlabel('Position')
-    ax_bottom.set_ylabel('Hardness Value (Brinell Hardness - BHN)') # Updated label
+    ax_bottom.set_ylabel('Hardness - BHN') # Updated label
     ax_bottom.grid(True)
 
     # Add control limits and mean to Bottom plot if available
@@ -223,7 +226,7 @@ def update_plot(current_bottom_values, current_top_values,
     ax_top.plot(x_positions, current_top_values, marker='o', linestyle='-', color='lightcoral', label='Current Reading')
     ax_top.set_title('Top Hardness Readings')
     ax_top.set_xlabel('Position')
-    ax_top.set_ylabel('Hardness Value (Brinell Hardness - BHN)') # Updated label
+    ax_top.set_ylabel('Hardness - BHN') # Updated label
     ax_top.grid(True)
 
     # Add control limits and mean to Top plot if available
@@ -269,14 +272,17 @@ def display_on_graph():
     bottom_hardness_raw = [entry_bottom_hardness[i].get().strip() for i in range(6)]
     top_hardness_raw = [entry_top_hardness[i].get().strip() for i in range(6)]
 
-    # Basic validation
-    if not technician_initials:
-        messagebox.showerror("Input Error", "Technician Initials are required!")
-        button_save_to_db['state'] = tk.DISABLED # Disable save button if validation fails
+    # Basic validation for Technician Initials length
+    if not (2 <= len(technician_initials) <= 4):
+        messagebox.showerror("Input Error", "Tech Initials must be between 2 and 4 characters long.")
+        button_save_to_db['state'] = tk.DISABLED
         return
-    if not sample_id:
-        messagebox.showerror("Input Error", "Sample ID is required!")
-        button_save_to_db['state'] = tk.DISABLED # Disable save button if validation fails
+    
+    # Validation for Sample ID format: three chars, hyphen, two chars (e.g., 123-ab)
+    sample_id_pattern = re.compile(r"^.{3}-.{2}$")
+    if not sample_id_pattern.match(sample_id):
+        messagebox.showerror("Input Error", "Sample ID must be in the format 'XXX-YY' (e.g., '123-ab').")
+        button_save_to_db['state'] = tk.DISABLED
         return
 
     # Process Bottom Hardness values
@@ -287,6 +293,11 @@ def display_on_graph():
             return
         try:
             hardness_value = float(val_str)
+            # Hardness value range validation
+            if not (100 <= hardness_value <= 500):
+                messagebox.showerror("Input Error", f"Bottom {i+1} Hardness must be between 100 and 500.")
+                button_save_to_db['state'] = tk.DISABLED
+                return
             record = (technician_initials, sample_id, 'Bottom', i + 1, hardness_value)
             _pending_records_to_save.append(record)
             _current_displayed_bottom_values.append(hardness_value)
@@ -303,6 +314,11 @@ def display_on_graph():
             return
         try:
             hardness_value = float(val_str)
+            # Hardness value range validation
+            if not (100 <= hardness_value <= 500):
+                messagebox.showerror("Input Error", f"Top {i+1} Hardness must be between 100 and 500.")
+                button_save_to_db['state'] = tk.DISABLED
+                return
             record = (technician_initials, sample_id, 'Top', i + 1, hardness_value)
             _pending_records_to_save.append(record)
             _current_displayed_top_values.append(hardness_value)
@@ -334,7 +350,7 @@ def display_on_graph():
                 mean_top, ucl_top, lcl_top)
 
     messagebox.showinfo("Display Success", "Data displayed on graph. Please review before saving to database.")
-    # Enable the save button once validation passes and data is prepared for saving
+    # Enable the save button once all validations pass and data is prepared for saving
     button_save_to_db['state'] = tk.NORMAL
 
 
@@ -355,7 +371,7 @@ def save_to_database():
         try:
             insert_sql = f"""
                 INSERT INTO {TABLE_NAME} (TechnicianInitials, SampleID, TopOrBottom, Position, HardnessValue)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?); -- Added semicolon
             """
             cursor.executemany(insert_sql, _pending_records_to_save)
             conn.commit()
@@ -408,66 +424,111 @@ def save_to_database():
 root = tk.Tk()
 root.title("Hardness Data Entry App")
 # Adjusted height to better accommodate two plots
-root.geometry("800x1000")
+root.geometry("800x700") # Adjusted height to 700 from 1000
 
-# Configure grid column and row weights for responsive layout
-root.grid_columnconfigure(0, weight=1) # Label column
-root.grid_columnconfigure(1, weight=3) # Entry field column
+# Define fonts for labels and entries
+label_font = font.nametofont("TkDefaultFont")
+label_font.configure(size=12) # Set label font size to 12
 
-# 2 initial fields + 12 hardness fields + 2 button rows + 1 plot row = 17 rows
-for i in range(17):
-    root.grid_rowconfigure(i, weight=1)
+entry_font = font.nametofont("TkTextFont") # TkTextFont is usually for entries/text widgets
+entry_font.configure(size=24) # Set entry font size to 24 (doubled for height)
 
+# --- UI Layout Parameters ---
+# Number of columns for hardness value entries (6 for B1-B6 and T1-T6)
+num_hardness_cols = 6
+# Total columns for display (1 for labels + num_hardness_cols for entries/spanning)
+# Making it 6 columns, where Technician/Sample labels take column 0 and entries span 5 columns
+num_display_columns = num_hardness_cols
 
-# Create and place labels and entry fields
+# Configure grid column weights to distribute space evenly among the 6 hardness columns
+for i in range(num_display_columns):
+    root.grid_columnconfigure(i, weight=1)
+
+# Initialize current_row counter
 current_row = 0
 
-# Technician Initials
-label_technician_initials = tk.Label(root, text="Technician Initials:")
-label_technician_initials.grid(row=current_row, column=0, padx=10, pady=5, sticky="e")
-entry_technician_initials = tk.Entry(root)
-entry_technician_initials.grid(row=current_row, column=1, padx=10, pady=5, sticky="ew")
+# --- Tech Initials ---
+label_technician_initials = tk.Label(root, text="Tech Initials:", font=label_font)
+# Place label in the first column, align to the left
+label_technician_initials.grid(row=current_row, column=0, padx=10, pady=5, sticky="w")
+entry_technician_initials = tk.Entry(root, font=entry_font)
+# Place entry in the second column and let it span across the remaining 5 columns
+entry_technician_initials.grid(row=current_row, column=1, columnspan=num_hardness_cols - 1, padx=10, pady=5, sticky="ew")
 current_row += 1
 
-# Sample ID
-label_sample_id = tk.Label(root, text="Sample ID:")
-label_sample_id.grid(row=current_row, column=0, padx=10, pady=5, sticky="e")
-entry_sample_id = tk.Entry(root)
-entry_sample_id.grid(row=current_row, column=1, padx=10, pady=5, sticky="ew")
+# --- Sample ID ---
+label_sample_id = tk.Label(root, text="Sample ID:", font=label_font)
+# Place label in the first column, align to the left
+label_sample_id.grid(row=current_row, column=0, padx=10, pady=5, sticky="w")
+entry_sample_id = tk.Entry(root, font=entry_font)
+# Place entry in the second column and let it span across the remaining 5 columns
+entry_sample_id.grid(row=current_row, column=1, columnspan=num_hardness_cols - 1, padx=10, pady=5, sticky="ew")
 current_row += 1
 
-# Bottom Hardness Fields
+# Add a small visual separator or empty row for better grouping
+current_row += 1 # Add an empty row for spacing before hardness values
+
+# --- Bottom Hardness Labels and Entries ---
+# Labels for Bottom Hardness positions (B1, B2, ..., B6)
+label_bottom_headers = []
+for i in range(num_hardness_cols):
+    label = tk.Label(root, text=f"Bottom {i+1}", font=label_font)
+    # Labels directly above their respective entries
+    label.grid(row=current_row, column=i, padx=5, pady=2, sticky="s")
+    label_bottom_headers.append(label)
+current_row += 1 # Move to the row for entries
+
 entry_bottom_hardness = []
-for i in range(6):
-    label = tk.Label(root, text=f"Bottom {i+1} Hardness:")
-    label.grid(row=current_row, column=0, padx=10, pady=5, sticky="e")
-    entry = tk.Entry(root)
-    entry.grid(row=current_row, column=1, padx=10, pady=5, sticky="ew")
+for i in range(num_hardness_cols):
+    entry = tk.Entry(root, font=entry_font)
+    # Entries aligned horizontally
+    entry.grid(row=current_row, column=i, padx=5, pady=5, sticky="ew")
     entry_bottom_hardness.append(entry)
-    current_row += 1
+current_row += 1 # Move to the next row after Bottom entries
 
-# Top Hardness Fields
+# --- Top Hardness Labels and Entries ---
+# Labels for Top Hardness positions (T1, T2, ..., T6)
+label_top_headers = []
+for i in range(num_hardness_cols):
+    label = tk.Label(root, text=f"Top {i+1}", font=label_font)
+    # Labels directly above their respective entries, aligning with Bottom labels
+    label.grid(row=current_row, column=i, padx=5, pady=2, sticky="s")
+    label_top_headers.append(label)
+current_row += 1 # Move to the row for entries
+
 entry_top_hardness = []
-for i in range(6):
-    label = tk.Label(root, text=f"Top {i+1} Hardness:")
-    label.grid(row=current_row, column=0, padx=10, pady=5, sticky="e")
-    entry = tk.Entry(root)
-    entry.grid(row=current_row, column=1, padx=10, pady=5, sticky="ew")
+for i in range(num_hardness_cols):
+    entry = tk.Entry(root, font=entry_font)
+    # Entries aligned horizontally, aligning with Bottom entries
+    entry.grid(row=current_row, column=i, padx=5, pady=5, sticky="ew")
     entry_top_hardness.append(entry)
-    current_row += 1
+current_row += 1 # Move to the next row after Top entries
+
+# Configure all rows to expand (except for some spacing rows)
+# Assuming a reasonable number of rows will be used by the layout logic above
+total_rows_for_widgets = current_row
+for i in range(total_rows_for_widgets):
+    root.grid_rowconfigure(i, weight=1) # Give all widget rows some weight for responsiveness
+
+# Create a frame for buttons to easily manage their horizontal layout
+button_frame = tk.Frame(root)
+button_frame.grid(row=current_row, column=0, columnspan=num_display_columns, pady=10)
+# Configure columns within the button frame to distribute space for buttons
+button_frame.grid_columnconfigure(0, weight=1)
+button_frame.grid_columnconfigure(1, weight=1)
+
 
 # Create and place the "Display on Graph" button
-button_display_on_graph = tk.Button(root, text="Display on Graph", command=display_on_graph)
-button_display_on_graph.grid(row=current_row, column=0, columnspan=2, pady=10)
-current_row += 1 # Increment current_row for the next button
+button_display_on_graph = tk.Button(button_frame, text="Display on Graph", command=display_on_graph, font=label_font)
+button_display_on_graph.grid(row=0, column=0, padx=5, pady=0, sticky="ew") # Placed in button_frame
 
 # Create and place the "Save to Database" button (initially disabled)
-button_save_to_db = tk.Button(root, text="Save to Database", command=save_to_database, state=tk.DISABLED)
-button_save_to_db.grid(row=current_row, column=0, columnspan=2, pady=10)
+button_save_to_db = tk.Button(button_frame, text="Save to Database", command=save_to_database, state=tk.DISABLED, font=label_font)
+button_save_to_db.grid(row=0, column=1, padx=5, pady=0, sticky="ew") # Placed in button_frame
 current_row += 1 # Increment current_row for the plot area
 
-# Initialize the plot area with two subplots
-create_plot_area()
+# Initialize the plot area with two subplots, spanning all display columns
+create_plot_area() # This function will use `num_display_columns` for columnspan
 
 # Initial database setup (create table if not exists)
 create_table_if_not_exists()
@@ -479,13 +540,13 @@ initial_historical_bottom_values, initial_historical_top_values = get_all_hardne
 initial_mean_bottom, initial_ucl_bottom, initial_lcl_bottom = calculate_control_limits(initial_historical_bottom_values)
 if initial_ucl_bottom is None:
     initial_mean_bottom, initial_ucl_bottom, initial_lcl_bottom = DEFAULT_BOTTOM_MEAN, DEFAULT_BOTTOM_UCL, DEFAULT_BOTTOM_LCL
-    print("Using default Bottom SPC limits on startup.") # For debugging
+    print("Using default Bottom SPC limits on startup.")
 
 # Calculate initial limits for Top
 initial_mean_top, initial_ucl_top, initial_lcl_top = calculate_control_limits(initial_historical_top_values)
 if initial_ucl_top is None:
     initial_mean_top, initial_ucl_top, initial_lcl_top = DEFAULT_TOP_MEAN, DEFAULT_TOP_UCL, DEFAULT_TOP_LCL
-    print("Using default Top SPC limits on startup.") # For debugging
+    print("Using default Top SPC limits on startup.")
 
 # Pass empty lists for current readings on startup, as none have been entered yet
 update_plot([], [],
